@@ -216,6 +216,7 @@ public:
     friend class ModeGuided;
     friend class ModeLand;
     friend class ModeLoiter;
+    friend class LowAltLimit;
     friend class ModePosHold;
     friend class ModeRTL;
     friend class ModeSmartRTL;

@@ -1249,6 +1249,12 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     // @User: Advanced
     AP_GROUPINFO("FS_EKF_FILT", 8, ParametersG2, fs_ekf_filt_hz, FS_EKF_FILT_DEFAULT),
 
+#if LOWALT_LIMIT_ENABLED
+    // @Group: LOWALT_
+    // @Path: low_alt_limit.cpp
+    AP_SUBGROUPINFO(low_alt_limit, "LOWALT_", 9, ParametersG2, LowAltLimit),
+#endif
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND

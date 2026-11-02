@@ -38,6 +38,10 @@ bool ModeLoiter::init(bool ignore_checks)
     _precision_loiter_active = false;
 #endif
 
+#if LOWALT_LIMIT_ENABLED
+    g2.low_alt_limit.init();
+#endif
+
     return true;
 }
 
@@ -87,8 +91,21 @@ void ModeLoiter::run()
     float target_yaw_rate = 0.0f;
     float target_climb_rate = 0.0f;
 
+#if LOWALT_LIMIT_ENABLED
+    // reduce pilot limits when the rangefinder shows we are close to
+    // the ground.  Only the pilot's inputs are limited: the correction
+    // speed set in init() and precision loiter keep their normal authority
+    g2.low_alt_limit.update();
+    const float pilot_speed_dn = g2.low_alt_limit.get_max_descent_cms(get_pilot_speed_dn());
+    const float angle_max_cd = g2.low_alt_limit.get_angle_max_cd(loiter_nav->get_angle_max_cd());
+    loiter_nav->set_speed_limit_cms(g2.low_alt_limit.get_max_speed_xy_cms(loiter_nav->get_speed_max_cms()));
+#else
+    const float pilot_speed_dn = get_pilot_speed_dn();
+    const float angle_max_cd = loiter_nav->get_angle_max_cd();
+#endif
+
     // set vertical speed and acceleration limits
-    pos_control->set_max_speed_accel_z(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
+    pos_control->set_max_speed_accel_z(-pilot_speed_dn, g.pilot_speed_up, g.pilot_accel_z);
 
     // process pilot inputs unless we are in radio failsafe
     if (!copter.failsafe.radio) {
@@ -96,7 +113,7 @@ void ModeLoiter::run()
         update_simple_mode();
 
         // convert pilot input to lean angles
-        get_pilot_desired_lean_angles(target_roll, target_pitch, loiter_nav->get_angle_max_cd(), attitude_control->get_althold_lean_angle_max_cd());
+        get_pilot_desired_lean_angles(target_roll, target_pitch, angle_max_cd, attitude_control->get_althold_lean_angle_max_cd());
 
         // process pilot's roll and pitch input
         loiter_nav->set_pilot_desired_acceleration(target_roll, target_pitch);
@@ -106,7 +123,7 @@ void ModeLoiter::run()
 
         // get pilot desired climb rate
         target_climb_rate = get_pilot_desired_climb_rate(channel_throttle->get_control_in());
-        target_climb_rate = constrain_float(target_climb_rate, -get_pilot_speed_dn(), g.pilot_speed_up);
+        target_climb_rate = constrain_float(target_climb_rate, -pilot_speed_dn, g.pilot_speed_up);
     } else {
         // clear out pilot desired acceleration in case radio failsafe event occurs and we do not switch to RTL for some reason
         loiter_nav->clear_pilot_desired_acceleration();

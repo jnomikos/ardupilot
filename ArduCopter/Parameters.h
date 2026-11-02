@@ -4,6 +4,7 @@
 
 #include <AP_Common/AP_Common.h>
 #include "RC_Channel.h"
+#include "low_alt_limit.h"
 #include <AP_Proximity/AP_Proximity.h>
 
 #include <AP_Gripper/AP_Gripper_config.h>
@@ -702,6 +703,11 @@ public:
     AP_Float pldp_range_finder_minimum_m;
     AP_Float pldp_delay_s;
     AP_Float pldp_descent_speed_ms;
+
+#if LOWALT_LIMIT_ENABLED
+    // low altitude limits on pilot descent rate, horizontal speed and lean angle
+    LowAltLimit low_alt_limit;
+#endif
 };
 
 extern const AP_Param::Info        var_info[];

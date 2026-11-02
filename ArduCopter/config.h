@@ -74,6 +74,12 @@
  # define RANGEFINDER_ENABLED ENABLED
 #endif
 
+// low altitude limits on pilot descent rate, horizontal speed and lean angle in Loiter.
+// Requires a downward rangefinder
+#ifndef LOWALT_LIMIT_ENABLED
+ # define LOWALT_LIMIT_ENABLED (RANGEFINDER_ENABLED == ENABLED && MODE_LOITER_ENABLED == ENABLED)
+#endif
+
 #ifndef RANGEFINDER_HEALTH_MAX
  # define RANGEFINDER_HEALTH_MAX 3          // number of good reads that indicates a healthy rangefinder
 #endif

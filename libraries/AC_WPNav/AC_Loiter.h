@@ -47,6 +47,13 @@ public:
     /// get maximum lean angle when using loiter
     float get_angle_max_cd() const;
 
+    /// get the configured maximum horizontal speed in cm/s
+    float get_speed_max_cms() const { return _speed_cms; }
+
+    /// apply an additional horizontal speed limit in cm/s. Zero removes it.
+    /// Cleared by init_target() so it never outlives the mode that set it
+    void set_speed_limit_cms(float speed_limit_cms) { _speed_limit_cms = speed_limit_cms; }
+
     /// run the loiter controller
     void update(bool avoidance_on = true);
 
@@ -87,4 +94,5 @@ protected:
     Vector2f    _predicted_euler_rate;
     uint32_t    _brake_timer;           // system time that brake was initiated
     float       _brake_accel;           // acceleration due to braking from previous iteration (used for jerk limiting)
+    float       _speed_limit_cms = 0.0f; // additional horizontal speed limit set by the flight mode, zero when none
 };

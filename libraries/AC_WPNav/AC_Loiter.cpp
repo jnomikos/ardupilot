@@ -104,6 +104,7 @@ void AC_Loiter::init_target(const Vector2f& position)
     _desired_accel.zero();
     _predicted_euler_angle.zero();
     _brake_accel = 0.0f;
+    _speed_limit_cms = 0.0f;
 
     // set target position
     _pos_control.set_pos_target_xy_cm(position.x, position.y);
@@ -127,6 +128,7 @@ void AC_Loiter::init_target()
     _predicted_euler_angle.x = radians(_pos_control.get_roll_cd()*0.01f);
     _predicted_euler_angle.y = radians(_pos_control.get_pitch_cd()*0.01f);
     _brake_accel = 0.0f;
+    _speed_limit_cms = 0.0f;
 }
 
 /// reduce response for landing
@@ -211,6 +213,10 @@ void AC_Loiter::calc_desired_velocity(bool avoidance_on)
     // calculate a loiter speed limit which is the minimum of the value set by the LOITER_SPEED
     // parameter and the value set by the EKF to observe optical flow limits
     float gnd_speed_limit_cms = MIN(_speed_cms, ekfGndSpdLimit * 100.0f);
+    if (is_positive(_speed_limit_cms)) {
+        // further limit requested by the flight mode (e.g. low altitude limits)
+        gnd_speed_limit_cms = MIN(gnd_speed_limit_cms, _speed_limit_cms);
+    }
     gnd_speed_limit_cms = MAX(gnd_speed_limit_cms, LOITER_SPEED_MIN);
 
     float pilot_acceleration_max = angle_to_accel(get_angle_max_cd() * 0.01) * 100;

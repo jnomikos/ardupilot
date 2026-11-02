@@ -3993,6 +3993,179 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self._Parachute(self.run_cmd)
         self._Parachute(self.run_cmd_int)
 
+    def LowAltLimit(self):
+        '''Test low altitude pilot limits in Loiter with a rangefinder'''
+        self.set_analog_rangefinder_parameters()
+        self.set_parameter("LOWALT_ENABLE", 1)
+        self.set_parameters({
+            "LOWALT_HGT": 5,
+            "LOWALT_SPD_DN": 50,
+            "LOWALT_SPD_XY": 100,
+            "LOWALT_ANG_MAX": 10,
+            "PILOT_SPEED_UP": 250,
+            "PILOT_SPEED_DN": 250,
+            "RC9_OPTION": 10,  # rangefinder enable/disable switch
+        })
+        self.set_rc(9, 2000)
+        self.reboot_sitl()
+
+        hgt = 5
+        full_rate = 2.5
+        limited_rate = 0.5
+
+        def wait_full_descent_rate():
+            self.wait_descent_rate(full_rate, accuracy=0.4, timeout=20)
+
+        def wait_limited_descent_rate():
+            # LOWALT_SPD_DN with some allowance for controller tracking
+            self.wait_descent_rate(limited_rate, accuracy=0.2, minimum_duration=3, timeout=30)
+
+        def climb_to(alt_min, alt_max):
+            self.set_rc(3, 2000)
+            self.wait_altitude(alt_min, alt_max, relative=True, timeout=60)
+            self.hover()
+
+        def descend_to(alt_max):
+            self.set_rc(3, 1000)
+            self.wait_altitude(0, alt_max, relative=True, timeout=60)
+            self.hover()
+
+        def assert_altitude_above(alt_min, why):
+            alt = self.get_altitude(relative=True)
+            if alt < alt_min:
+                raise NotAchievedException("%s (alt=%f want>%f)" % (why, alt, alt_min))
+
+        def assert_unlimited_descent_into_band():
+            # a full-rate descent from above the band must still be fast inside it
+            self.set_rc(3, 1000)
+            tstart = self.get_sim_time()
+            while True:
+                if self.get_sim_time_cached() - tstart > 60:
+                    raise NotAchievedException("Did not descend into the limited band")
+                if self.get_altitude(relative=True) < hgt + 1:
+                    break
+            rate = self.get_descent_rate()
+            self.hover()
+            if rate < 1.5:
+                raise NotAchievedException("Descent limited unexpectedly (rate=%f)" % rate)
+
+        def assert_horizontal_limited(max_speed, max_pitch_deg_allowed=None):
+            self.set_rc(2, 1000)  # full pitch forward
+            tstart = self.get_sim_time()
+            max_groundspeed = 0
+            max_pitch_deg = 0
+            while self.get_sim_time_cached() - tstart < 10:
+                hud = self.assert_receive_message('VFR_HUD')
+                att = self.assert_receive_message('ATTITUDE')
+                max_groundspeed = max(max_groundspeed, hud.groundspeed)
+                max_pitch_deg = max(max_pitch_deg, abs(math.degrees(att.pitch)))
+            self.set_rc(2, 1500)
+            self.progress("Limited: max groundspeed=%f max pitch=%f" % (max_groundspeed, max_pitch_deg))
+            if max_groundspeed > max_speed:
+                raise NotAchievedException("Groundspeed %f exceeded LOWALT_SPD_XY" % max_groundspeed)
+            if max_pitch_deg_allowed is not None and max_pitch_deg > max_pitch_deg_allowed:
+                raise NotAchievedException("Pitch %f exceeded LOWALT_ANG_MAX" % max_pitch_deg)
+            self.wait_groundspeed(0, 0.5, timeout=30)
+
+        self.progress("Descent profile with a healthy rangefinder")
+        self.takeoff(30, mode="LOITER", timeout=120)
+        self.set_rc(3, 1000)
+        wait_full_descent_rate()
+        assert_altitude_above(2 * hgt + 2, "Full descent rate not reached above 2x LOWALT_HGT")
+        self.wait_altitude(0, hgt, relative=True, timeout=60)
+        wait_limited_descent_rate()
+        self.wait_disarmed(timeout=120)
+
+        self.progress("Horizontal speed and lean angle are limited near the ground")
+        self.takeoff(2, mode="LOITER", timeout=60)
+        assert_horizontal_limited(1.3, max_pitch_deg_allowed=15)
+
+        self.progress("Horizontal speed is not limited above 2x LOWALT_HGT")
+        climb_to(20, 25)
+        self.set_rc(2, 1000)
+        self.wait_groundspeed(3, 100, timeout=15)
+        self.set_rc(2, 1500)
+        self.wait_groundspeed(0, 0.5, timeout=30)
+
+        self.progress("Rangefinder disabled by switch while limited holds every limit")
+        descend_to(hgt - 1)
+        self.context_collect('STATUSTEXT')
+        self.set_rc(9, 1000)
+        self.wait_statustext("limits held", check_context=True, timeout=10)
+        climb_to(20, 25)
+        self.set_rc(3, 1000)
+        wait_limited_descent_rate()
+        assert_altitude_above(2 * hgt + 2, "Descent limit released while rangefinder disabled")
+        self.hover()
+        assert_horizontal_limited(1.3)
+
+        self.progress("Rangefinder recovery releases the limit")
+        self.context_clear_collection('STATUSTEXT')
+        self.set_rc(9, 2000)
+        self.wait_statustext("height available", check_context=True, timeout=10)
+        assert_altitude_above(2 * hgt + 3, "Not high enough to check release")
+        self.set_rc(3, 1000)
+        wait_full_descent_rate()
+        self.hover()
+
+        self.progress("Below-minimum reading inside the band counts as zero height")
+        descend_to(2 * hgt - 2)
+        self.set_parameter("RNGFND1_MIN_CM", 1500)
+        self.set_rc(3, 1000)
+        wait_limited_descent_rate()
+        assert_altitude_above(hgt - 1, "Descended too far during below-minimum check")
+        self.hover()
+        self.set_parameter("RNGFND1_MIN_CM", 0)
+
+        self.progress("Below-minimum reading at altitude is a lost source, not zero height")
+        climb_to(20, 25)
+        self.context_clear_collection('STATUSTEXT')
+        self.set_parameter("RNGFND1_MIN_CM", 3000)
+        self.wait_statustext("limits inactive", check_context=True, timeout=10)
+        self.set_rc(3, 1000)
+        wait_full_descent_rate()
+        assert_altitude_above(2 * hgt + 2, "Full rate not kept after implausible below-minimum")
+        self.hover()
+        self.context_clear_collection('STATUSTEXT')
+        self.set_parameter("RNGFND1_MIN_CM", 0)
+        self.wait_statustext("height available", check_context=True, timeout=10)
+
+        self.progress("Re-entering the mode releases a held limit and says so")
+        descend_to(hgt - 1)
+        self.context_clear_collection('STATUSTEXT')
+        self.set_parameter("RNGFND1_MAX_CM", 100)  # every sample is now out-of-range-high
+        self.wait_statustext("limits held", check_context=True, timeout=10)
+        self.change_mode("ALT_HOLD")
+        self.change_mode("LOITER")
+        self.wait_statustext("released by mode change", check_context=True, timeout=10)
+        self.context_clear_collection('STATUSTEXT')
+        self.set_parameter("RNGFND1_MAX_CM", 4000)
+        self.wait_statustext("height available", check_context=True, timeout=10)
+
+        self.progress("Missing rangefinder warns on mode entry and does not limit")
+        self.change_mode("ALT_HOLD")
+        self.set_rc(9, 1000)  # disable the rangefinder
+        climb_to(20, 25)
+        self.context_clear_collection('STATUSTEXT')
+        self.change_mode("LOITER")
+        self.wait_statustext("no downward rangefinder", check_context=True, timeout=10)
+        assert_unlimited_descent_into_band()
+        self.set_rc(9, 2000)
+
+        self.progress("Other modes are not affected")
+        climb_to(20, 25)
+        self.change_mode("ALT_HOLD")
+        assert_unlimited_descent_into_band()
+        self.change_mode("LOITER")
+
+        self.progress("Disabled feature has no effect")
+        climb_to(20, 25)
+        self.set_parameter("LOWALT_ENABLE", 0)
+        assert_unlimited_descent_into_band()
+        self.set_parameter("LOWALT_ENABLE", 1)
+
+        self.land_and_disarm()
+
     def PrecisionLanding(self):
         """Use PrecLand backends precision messages to land aircraft."""
 
@@ -10223,6 +10396,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.RangeFinder,
              self.BaroDrivers,
              self.SurfaceTracking,
+             self.LowAltLimit,
              self.Parachute,
              self.ParameterChecks,
              self.ManualThrottleModeChange,
